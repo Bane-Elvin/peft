@@ -28,7 +28,7 @@ from .._buffer_dict import BufferDict
 
 class VeraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
-    adapter_layer_names = ("vera_lambda_b", "vera_lambda_d")
+    adapter_layer_names = ("vera_lambda_d", )
     other_param_names = ("vera_A", "vera_B")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
@@ -37,7 +37,6 @@ class VeraLayer(BaseTunerLayer):
         self.vera_dropout = nn.ModuleDict({})
 
         # For storing vector scale
-        self.vera_lambda_b = nn.ParameterDict({})
         self.vera_lambda_d = nn.ParameterDict({})
 
         # Stores a reference to the vera_A/B BufferDict.
@@ -73,7 +72,6 @@ class VeraLayer(BaseTunerLayer):
         r,
         vera_dropout,
         init_weights,
-        d_initial: float = 0.1,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -85,7 +83,6 @@ class VeraLayer(BaseTunerLayer):
 
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
         # Actual trainable parameters
-        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
         self.vera_lambda_d[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
 
         # non trainable references to vera_A/B buffers
@@ -126,16 +123,15 @@ class VeraLayer(BaseTunerLayer):
             self.vera_B[adapter_name] = vera_B_param
 
         if init_weights:
-            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def reset_vera_parameters(self, adapter_name, d_initial: float = 0.1):
+    def reset_vera_parameters(self, adapter_name):
         if adapter_name in self.vera_lambda_d.keys():
             with torch.no_grad():
-                nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial)
-                nn.init.zeros_(self.vera_lambda_b[adapter_name])
+                nn.init.zeros_(self.vera_lambda_d[adapter_name])
 
 
 class Linear(nn.Linear, VeraLayer):
@@ -151,7 +147,6 @@ class Linear(nn.Linear, VeraLayer):
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         init_weights: bool = True,
-        d_initial: float = 0.1,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
@@ -160,7 +155,7 @@ class Linear(nn.Linear, VeraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
+        self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -231,19 +226,16 @@ class Linear(nn.Linear, VeraLayer):
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         lambda_d = self.vera_lambda_d[adapter]
-        lambda_b = self.vera_lambda_b[adapter]
 
         if cast_to_fp32:
             vera_A = vera_A.float()
             vera_B = vera_B.float()
             lambda_d = lambda_d.float()
-            lambda_b = lambda_b.float()
 
         sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
         sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
-        lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
-        output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
+        output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -251,7 +243,6 @@ class Linear(nn.Linear, VeraLayer):
             # cast back the weights
             # TODO: why?
             self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
-            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
 
         return output_tensor
 
@@ -271,7 +262,6 @@ class Linear(nn.Linear, VeraLayer):
                     continue
 
                 lambda_d = self.vera_lambda_d[active_adapter]
-                lambda_b = self.vera_lambda_b[active_adapter]
 
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
@@ -284,7 +274,7 @@ class Linear(nn.Linear, VeraLayer):
 
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
-                result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
+                result = result + F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
 
         result = result.to(previous_dtype)
         return result

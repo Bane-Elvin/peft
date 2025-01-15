@@ -99,7 +99,6 @@ class VeraConfig(PeftConfig):
         },
     )
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
-    d_initial: float = field(default=0.1, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},

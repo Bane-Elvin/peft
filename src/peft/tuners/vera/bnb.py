@@ -55,7 +55,6 @@ if is_bnb_available():
                 r,
                 vera_dropout=vera_dropout,
                 init_weights=init_weights,
-                d_initial=d_initial,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -153,24 +152,21 @@ if is_bnb_available():
             cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
             lambda_d = self.vera_lambda_d[adapter]
-            lambda_b = self.vera_lambda_b[adapter]
 
             if cast_to_fp32:
                 vera_A = vera_A.float()
                 vera_B = vera_B.float()
                 lambda_d = lambda_d.float()
-                lambda_b = lambda_b.float()
 
             sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
             sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
-            lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
             # VeRA-specific computation:
             # 1. Apply lambda_d to the input projection (vera_A)
             # 2. Apply lambda_b to the output projection (vera_B)
             # 3. Compute the outer product of the scaled projections
-            output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
+            output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
             if cast_to_fp32:
                 output_tensor = output_tensor.to(dtype=dtype)
@@ -205,7 +201,6 @@ if is_bnb_available():
                         continue
 
                     lambda_d = self.vera_lambda_d[active_adapter]
-                    lambda_b = self.vera_lambda_b[active_adapter]
 
                     vera_A = self.vera_A[active_adapter]
                     vera_B = self.vera_B[active_adapter]
@@ -224,7 +219,7 @@ if is_bnb_available():
 
                     x_temp = dropout(x.to(lambda_d.dtype))
 
-                    adapter_output = lambda_b * torch.nn.functional.linear(
+                    adapter_output =  torch.nn.functional.linear(
                         lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
                     )
 
@@ -269,7 +264,6 @@ if is_bnb_4bit_available():
                 r,
                 vera_dropout=vera_dropout,
                 init_weights=init_weights,
-                d_initial=d_initial,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -338,20 +332,17 @@ if is_bnb_4bit_available():
             cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
             lambda_d = self.vera_lambda_d[adapter]
-            lambda_b = self.vera_lambda_b[adapter]
 
             if cast_to_fp32:
                 vera_A = vera_A.float()
                 vera_B = vera_B.float()
                 lambda_d = lambda_d.float()
-                lambda_b = lambda_b.float()
 
             sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
             sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
-            lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
-            output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
+            output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
             if cast_to_fp32:
                 output_tensor = output_tensor.to(dtype=dtype)
@@ -373,7 +364,6 @@ if is_bnb_4bit_available():
                         continue
 
                     lambda_d = self.vera_lambda_d[active_adapter]
-                    lambda_b = self.vera_lambda_b[active_adapter]
 
                     vera_A = self.vera_A[active_adapter]
                     vera_B = self.vera_B[active_adapter]
@@ -392,7 +382,7 @@ if is_bnb_4bit_available():
 
                     x_temp = dropout(x.to(lambda_d.dtype))
 
-                    adapter_output = lambda_b * torch.nn.functional.linear(
+                    adapter_output = torch.nn.functional.linear(
                         lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
                     )
 
