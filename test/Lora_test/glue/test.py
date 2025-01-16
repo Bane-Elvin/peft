@@ -27,7 +27,7 @@ torch.manual_seed(0)
 peft_config = VeraConfig(
     task_type="SEQ_CLS",
     r=rank,
-    target_modules=["query", "key", "value","intermediate.dense","output.dense"],
+    target_modules=["query", "key", "value"],
     save_projection=True,
 )
 head_lr = 1e-2
@@ -72,14 +72,14 @@ eval_dataloader = DataLoader(
 )
 
 model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
-# model = get_peft_model(model, peft_config)
-# model.print_trainable_parameters()
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
 
 print(model)
 
 optimizer = AdamW(
     [
-        # {"params": [p for n, p in model.named_parameters() if "vera_lambda_" in n], "lr": vera_lr},
+        {"params": [p for n, p in model.named_parameters() if "vera_lambda_" in n], "lr": vera_lr},
         {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": head_lr},
     ]
 )

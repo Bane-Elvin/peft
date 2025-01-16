@@ -69,6 +69,37 @@ def _kaiming_init(
         return tensor.uniform_(-bound, bound, generator=generator)
 
 
+def _kaiming_init_SVD(
+    tensor_or_shape: Union[torch.Tensor, tuple[int, ...]],
+    generator: torch.Generator,
+) -> (torch.Tensor, torch.Tensor):
+    """
+    Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object for PRNG.
+
+    Args:
+        tensor_or_shape (`Union[torch.Tensor, tuple[int, ...]]`):
+            Tensor to initialise, or shape of new tensor to create and then initialise.
+        generator: (`torch.Generator`):
+            Generator object that manages the state of the PRNG algorithm in use.
+
+    Returns:
+        `torch.Tensor`: The initialised tensor.
+    """
+    if isinstance(tensor_or_shape, tuple):
+        tensor = torch.empty(tensor_or_shape)
+    else:
+        tensor = tensor_or_shape
+    fan = _calculate_correct_fan(tensor, "fan_in")
+    gain = math.sqrt(2)
+    std = gain / math.sqrt(fan)
+    bound = math.sqrt(3.0) * std
+
+    with torch.no_grad():
+        random_matrix = tensor.uniform_(-bound, bound, generator=generator)
+        U, S, Vh =torch.linalg.svd(random_matrix)
+        return U, Vh
+
+
 class VeraModel(BaseTuner):
     """
     Creates Vector-based Random Matrix Adaptation (Vera) model from a pretrained transformers model.
@@ -150,9 +181,9 @@ class VeraModel(BaseTuner):
 
         # deterministic init of vera_A and vera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        vera_A = _kaiming_init((config.r, linear_in_dim), generator=generator)
-        vera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
-
+        # vera_A = _kaiming_init((config.r, linear_in_dim), generator=generator)
+        # vera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
+        vera_A, vera_B = _kaiming_init_SVD((linear_out_dim, linear_in_dim), generator=generator)
         self.vera_A[adapter_name] = vera_A
         self.vera_B[adapter_name] = vera_B
 
