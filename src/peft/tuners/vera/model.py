@@ -99,7 +99,7 @@ class VeraModel(BaseTuner):
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
 
-    prefix: str = "vera_lambda"
+    prefix: str = "vera_lambda_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
@@ -230,6 +230,7 @@ class VeraModel(BaseTuner):
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_weights,
+                d_initial=vera_config.d_initial,
             )
         else:
             new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
@@ -354,6 +355,7 @@ class VeraModel(BaseTuner):
             vera_B,
             adapter_name,
             bias=bias,
+            d_initial=vera_config.d_initial,
             **kwargs,
         )
 
