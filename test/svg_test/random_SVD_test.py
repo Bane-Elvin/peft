@@ -6,7 +6,7 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from torch.nn.init import _calculate_correct_fan
-
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 def _kaiming_init(
@@ -39,13 +39,20 @@ def _kaiming_init(
         U, S, Vh =torch.linalg.svd(random_matrix)
         return U, S, Vh, random_matrix
 
-if __name__ == "__main__":
+def SVD_test():
     generator = torch.Generator(device="cpu").manual_seed(0)
-    U, S, Vh, rm  = _kaiming_init((256, 256), generator=generator)
-    S_diag = torch.diag_embed(S) if rm.size(0) == rm.size(1) else torch.diag(S)
+    U, S, Vh, rm  = _kaiming_init((128, 512), generator=generator)
+    S = S.unsqueeze(-1)
+    print(S)
+    if rm.size(0) != rm.size(1):
+        S_diag = torch.zeros((rm.size(0), rm.size(1)))
+        S_diag[:, :rm.size(0)] = torch.diag_embed(S)
+    else:
+        S_diag = torch.diag(S)
+
     # reconstructed_tensor = S * U @ Vh
-    reconstructed_tensor = Vh @ (S * U)
-    # reconstructed_tensor = U @ S_diag @ Vh
+    # reconstructed_tensor = Vh @ (S * U)
+    reconstructed_tensor = U @ S_diag @ Vh
     reconstruction_error = torch.norm(rm - reconstructed_tensor, p='fro').item()
 
     print(reconstruction_error)
@@ -58,3 +65,13 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.legend()
     plt.show()
+
+if __name__ == "__main__":
+    # 输入张量和权重
+    A = torch.randn(128, 86, 768)
+    B = torch.randn(768, 3072)
+
+    # 执行线性变换
+    result = F.linear(A, B.T)
+
+    print(result.shape)  # 输出: torch.Size([128, 86, 3072])

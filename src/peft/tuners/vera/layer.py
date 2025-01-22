@@ -232,10 +232,21 @@ class Linear(nn.Linear, VeraLayer):
             vera_B = vera_B.float()
             lambda_d = lambda_d.float()
 
-        sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
-        sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
-        lambda_d = lambda_d.unsqueeze(-1)
-        output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
+        sliced_A = vera_A[: self.in_features, : self.in_features].to(lambda_d.device)
+        sliced_B = vera_B[: self.out_features, : self.out_features].to(lambda_d.device)
+        # lambda_d = lambda_d.unsqueeze(-1)
+        # output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
+        if self.in_features < self.out_features:
+            S_diag = torch.zeros((self.in_features, self.out_features))
+            S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
+            output_tensor = transpose(sliced_A @ S_diag @ sliced_B, self.fan_in_fan_out)
+        elif self.out_features < self.in_features:
+            S_diag = torch.zeros((self.in_features, self.out_features))
+            S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
+            output_tensor = transpose(sliced_A @ S_diag @ sliced_B, self.fan_in_fan_out)
+        else:
+            lambda_d = lambda_d.unsqueeze(-1)
+            output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -266,15 +277,32 @@ class Linear(nn.Linear, VeraLayer):
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
 
+                # TODO: sliced方法需要调整，可以先调整为一个矩阵的slice，后面需要修改为依据size的生成，或者依据QKVO FFN矩阵的生成
                 # As adapted layers may have different shapes and VeRA contains a single shared pair of A and B matrices,
                 # we initialize these matrices with the largest required size for each dimension.
                 # During the forward pass, required submatrices are sliced out from the shared vera_A and vera_B.
-                sliced_A = vera_A[:, : self.in_features].to(x.device)
-                sliced_B = vera_B[: self.out_features, :].to(x.device)
+                sliced_A = vera_A[ : self.in_features, : self.in_features].to(x.device)
+                sliced_B = vera_B[ : self.out_features, : self.out_features].to(x.device)
 
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
-                result = result + F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
+                if self.in_features < self.out_features:
+                    S_diag = torch.zeros((self.in_features, self.out_features))
+                    S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
+                    S_diag = S_diag.to(lambda_d.dtype).to(x.device).T
+                    result = result + F.linear(F.linear(F.linear(dropout(x), sliced_A), S_diag), sliced_B)
+                    # result = result + F.linear(F.linear(F.linear(dropout(x), sliced_A), S_diag), sliced_B)
+                elif self.in_features > self.out_features:
+                    S_diag = torch.zeros((self.in_features, self.out_features))
+                    S_diag[:self.out_features, :] = torch.diag_embed(lambda_d)
+                    S_diag = S_diag.to(lambda_d.dtype).to(x.device).T
+                    result = result + F.linear(F.linear(F.linear(dropout(x), sliced_A), S_diag) , sliced_B)
+                else:
+                    # result1 = F.linear(dropout(x), sliced_A)
+                    # result2 = lambda_d * result1
+                    # result3 = F.linear(result2, sliced_B)
+                    result = result + F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
+                # result = result + F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
 
         result = result.to(previous_dtype)
         return result

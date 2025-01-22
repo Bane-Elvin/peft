@@ -27,7 +27,8 @@ torch.manual_seed(0)
 peft_config = VeraConfig(
     task_type="SEQ_CLS",
     r=rank,
-    target_modules=["query", "key", "value"],
+    target_modules=["query", "key", "value","output.dense","intermediate.dense"],
+    # target_modules=["query", "key", "value"],
     save_projection=True,
 )
 head_lr = 1e-2
