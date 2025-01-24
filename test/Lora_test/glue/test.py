@@ -6,34 +6,61 @@ from torch.utils.data import DataLoader
 from peft import (
     get_peft_model,
     VeraConfig,
+    LoraConfig,
+    AdaLoraConfig,
     PeftType,
+
 )
+import wandb
 
 import evaluate
 from datasets import load_dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed, AutoConfig
 from tqdm import tqdm
 
+# wandb.init(
+#     project="vera_peft_training",
+#     name="roberta_base_mrpc",)
+
 batch_size = 128
 model_name_or_path = "/home/elvin/NAS-Disk-1/WGA/models/roberta-base"
 task = "mrpc"
-peft_type = PeftType.VERA
+# peft_type = PeftType.VERA
+# peft_type = PeftType.LORA
+# peft_type = PeftType.ADALORA
 device = "cuda"
-num_epochs = 5  # for best results, increase this number
+num_epochs = 12  # for best results, increase this number
 rank = 768        # for best results, increase this number
 max_length = 128
 torch.manual_seed(0)
 
-peft_config = VeraConfig(
+# peft_config = VeraConfig(
+#     task_type="SEQ_CLS",
+#     r=rank,
+#     target_modules=["query", "key", "value","output.dense","intermediate.dense"],
+#     # target_modules=["query", "key", "value"],
+#     save_projection=True,
+# )
+
+# peft_config = LoraConfig(
+#     task_type="SEQ_CLS",
+#     r=8,
+#     target_modules=["query", "key", "value","output.dense","intermediate.dense"],
+#     # target_modules=["query", "key", "value"],
+# )
+
+peft_config = AdaLoraConfig(
     task_type="SEQ_CLS",
-    r=rank,
+    target_r=1,
+    init_r=8,
     target_modules=["query", "key", "value","output.dense","intermediate.dense"],
     # target_modules=["query", "key", "value"],
-    save_projection=True,
 )
-head_lr = 1e-2
-vera_lr = 2e-2
 
+head_lr = 1e-2
+# vera_lr = 2e-2
+vera_lr = 4e-2
+lora_lr =3e-4
 if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
     padding_side = "left"
 else:
@@ -78,19 +105,27 @@ model.print_trainable_parameters()
 
 print(model)
 
-optimizer = AdamW(
-    [
-        {"params": [p for n, p in model.named_parameters() if "vera_lambda_" in n], "lr": vera_lr},
-        {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": head_lr},
-    ]
-)
+# optimizer = AdamW(
+#     [
+#         {"params": [p for n, p in model.named_parameters() if "vera_lambda_" in n], "lr": vera_lr},
+#         {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": head_lr},
+#     ]
+# )
 
+optimizer = torch.optim.AdamW(model.parameters(), lr=lora_lr)
 # Instantiate scheduler
+# lr_scheduler = get_linear_schedule_with_warmup(
+#     optimizer=optimizer,
+#     num_warmup_steps=0.06 * (len(train_dataloader) * num_epochs),
+#     num_training_steps=(len(train_dataloader) * num_epochs),
+# )
+
 lr_scheduler = get_linear_schedule_with_warmup(
     optimizer=optimizer,
-    num_warmup_steps=0.06 * (len(train_dataloader) * num_epochs),
+    num_warmup_steps=0,
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
+model.base_model.peft_config["default"].total_step = len(train_dataloader) * num_epochs
 
 model.to(device)
 for epoch in range(num_epochs):
@@ -103,7 +138,7 @@ for epoch in range(num_epochs):
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
-
+    # wandb.log({"epoch": epoch + 1, "train_loss": total_loss / len(train_dataloader)})
     model.eval()
     for step, batch in enumerate(tqdm(eval_dataloader)):
         batch.to(device)
@@ -118,3 +153,5 @@ for epoch in range(num_epochs):
 
     eval_metric = metric.compute()
     print(f"epoch {epoch}:", eval_metric)
+#     wandb.log({"epoch": epoch + 1, "eval_metric": eval_metric})
+# wandb.finish()

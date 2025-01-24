@@ -237,10 +237,12 @@ class Linear(nn.Linear, VeraLayer):
         # lambda_d = lambda_d.unsqueeze(-1)
         # output_tensor = transpose(sliced_B @ (lambda_d * sliced_A), self.fan_in_fan_out)
         if self.in_features < self.out_features:
+            sliced_A, _ = torch.linalg.qr(sliced_A)
             S_diag = torch.zeros((self.in_features, self.out_features))
             S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
             output_tensor = transpose(sliced_A @ S_diag @ sliced_B, self.fan_in_fan_out)
         elif self.out_features < self.in_features:
+            sliced_B, _ = torch.linalg.qr(sliced_B)
             S_diag = torch.zeros((self.in_features, self.out_features))
             S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
             output_tensor = transpose(sliced_A @ S_diag @ sliced_B, self.fan_in_fan_out)
@@ -287,12 +289,14 @@ class Linear(nn.Linear, VeraLayer):
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
                 if self.in_features < self.out_features:
+                    sliced_A, _ = torch.linalg.qr(sliced_A)
                     S_diag = torch.zeros((self.in_features, self.out_features))
                     S_diag[:, :self.in_features] = torch.diag_embed(lambda_d)
                     S_diag = S_diag.to(lambda_d.dtype).to(x.device).T
                     result = result + F.linear(F.linear(F.linear(dropout(x), sliced_A), S_diag), sliced_B)
                     # result = result + F.linear(F.linear(F.linear(dropout(x), sliced_A), S_diag), sliced_B)
                 elif self.in_features > self.out_features:
+                    sliced_B, _ = torch.linalg.qr(sliced_B)
                     S_diag = torch.zeros((self.in_features, self.out_features))
                     S_diag[:self.out_features, :] = torch.diag_embed(lambda_d)
                     S_diag = S_diag.to(lambda_d.dtype).to(x.device).T
